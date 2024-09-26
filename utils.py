@@ -40,6 +40,7 @@ def get_company_info(crtfc_key, corp_code):
 
     return company_info
 
+
 # 주식 총수 정보를 가져오는 함수
 def get_stock_info(crtfc_key, corp_code, bsns_year, reprt_code):
     url = "https://opendart.fss.or.kr/api/stockTotqySttus.json"
@@ -55,9 +56,12 @@ def get_stock_info(crtfc_key, corp_code, bsns_year, reprt_code):
 
     if data and data.get('status') == '000':
         for stock in data.get('list', []):
-            if stock['se'].strip() == '보통주':
+            # '보통주' 또는 '의결권 있는 주식'인 경우에만 반환
+            if stock['se'].strip() in ['보통주', '의결권 있는 주식']:
                 return stock['istc_totqy']
     return None
+
+
 
 # 전일 종가 정보를 가져오는 함수
 def get_stock_close_price(corp_name, df_listed):

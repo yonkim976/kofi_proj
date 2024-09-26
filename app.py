@@ -1,6 +1,6 @@
 import streamlit as st
 import pandas as pd
-from datetime import datetime
+from datetime import datetime, timedelta
 from utils import get_company_info, get_stock_info, get_stock_close_price, get_major_shareholder_info
 
 # Streamlit UI
@@ -12,8 +12,11 @@ crtfc_key = st.text_input("API 인증키 입력", type="password")
 # 상장 회사 목록 CSV 파일 불러오기
 df_listed = pd.read_csv('listed_corp.csv', dtype=str, encoding='utf-8')
 
-# 사용자로부터 다중 회사명 입력 받기 (쉼표로 구분)
-corp_names = st.text_area("회사명 입력 (쉼표로 구분)", "회사1, 회사2")
+# 회사명 목록 생성
+company_names = df_listed['corp_name'].unique().tolist()
+
+# 사용자로부터 다중 회사명 선택 받기 (자동 완성 지원)
+corp_name_list = st.multiselect("회사명 선택", company_names)
 
 # 최근 5개년을 위한 연도 목록 생성
 current_year = datetime.now().year
@@ -36,8 +39,7 @@ reprt_code = reprt_code_options[reprt_code_label]
 search_clicked = st.button("검색")
 
 # 검색 버튼을 누르면 검색 실행
-if search_clicked and corp_names and crtfc_key:
-    corp_name_list = [name.strip() for name in corp_names.split(",")]
+if search_clicked and corp_name_list and crtfc_key:
     comparison_results = []
 
     for corp_name in corp_name_list:
@@ -71,7 +73,7 @@ if search_clicked and corp_names and crtfc_key:
         df_comparison = pd.DataFrame(comparison_results)
 
         # 시가총액에 천 단위 쉼표 추가
-        df_comparison["시가총액(억원)"] = df_comparison["시가총액(억원)"].apply(lambda x: f"{int(x):,}" if pd.notna(x) else "정보 없음")
+        df_comparison["시가총액(억원)"] = df_comparison["시가총액(억원)"].apply(lambda x: f"{int(x):,}" if pd.notna(x) and x != None else "정보 없음")
 
         df_transposed = df_comparison.T
         st.write(f"**{len(comparison_results)}개 회사 정보 비교 결과**")
@@ -82,11 +84,14 @@ if search_clicked and corp_names and crtfc_key:
         try:
             # 회사명과 시가총액을 사용하여 Bar 차트 생성
             df_filtered = df_comparison.dropna(subset=['시가총액(억원)'])  # 시가총액이 없는 회사는 제외
+            df_filtered = df_filtered[df_filtered['시가총액(억원)'] != "정보 없음"]  # "정보 없음"인 경우 제외
             df_filtered["시가총액(억원)"] = df_filtered["시가총액(억원)"].str.replace(',', '')  # 쉼표 제거
             df_filtered["시가총액(억원)"] = df_filtered["시가총액(억원)"].astype(int)  # 차트를 위한 정수 변환
             st.bar_chart(df_filtered.set_index('회사명')['시가총액(억원)'])  # Streamlit의 bar_chart를 사용
         except Exception as e:
             st.error(f"차트를 그리는 중 오류가 발생했습니다: {str(e)}")
-
-
-
+else:
+    if not crtfc_key:
+        st.warning("API 인증키를 입력해주세요.")
+    if not corp_name_list:
+        st.warning("회사명을 선택해주세요.")
