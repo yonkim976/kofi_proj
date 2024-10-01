@@ -1,7 +1,13 @@
 import streamlit as st
 import pandas as pd
 from datetime import datetime, timedelta
-from utils import get_company_info, get_stock_info, get_stock_close_price, get_major_shareholder_info
+from utils import (
+    get_company_info,
+    get_stock_info,
+    get_stock_close_price,
+    get_major_shareholder_info,
+    get_financial_statements
+)
 
 # Streamlit UI
 st.title("다중 회사 정보 조회 및 비교")
@@ -35,6 +41,14 @@ reprt_code_options = {
 reprt_code_label = st.selectbox("보고서 종류 선택", list(reprt_code_options.keys()))
 reprt_code = reprt_code_options[reprt_code_label]
 
+# 재무제표 구분 선택 추가
+fs_div_options = {
+    "연결재무제표": "CFS",
+    "개별재무제표": "OFS"
+}
+fs_div_label = st.selectbox("재무제표 구분 선택", list(fs_div_options.keys()))
+fs_div = fs_div_options[fs_div_label]
+
 # 검색 버튼
 search_clicked = st.button("검색")
 
@@ -49,9 +63,13 @@ if search_clicked and corp_name_list and crtfc_key:
             total_issued_stocks = get_stock_info(crtfc_key, corp_code, bsns_year, reprt_code)
             close_price = get_stock_close_price(corp_name, df_listed)
 
-            # 추가: 최대주주 정보 가져오기
+            # 최대주주 정보 가져오기
             major_shareholder_info = get_major_shareholder_info(corp_code, crtfc_key, bsns_year, reprt_code)
             company_info.update(major_shareholder_info)
+
+            # 재무 정보 가져오기 (fs_div 추가)
+            financial_info = get_financial_statements(corp_code, crtfc_key, bsns_year, reprt_code, fs_div)
+            company_info.update(financial_info)
 
             if total_issued_stocks and close_price:
                 market_cap = int(total_issued_stocks.replace(',', '')) * close_price
@@ -73,7 +91,19 @@ if search_clicked and corp_name_list and crtfc_key:
         df_comparison = pd.DataFrame(comparison_results)
 
         # 시가총액에 천 단위 쉼표 추가
-        df_comparison["시가총액(억원)"] = df_comparison["시가총액(억원)"].apply(lambda x: f"{int(x):,}" if pd.notna(x) and x != None else "정보 없음")
+        df_comparison["시가총액(억원)"] = df_comparison["시가총액(억원)"].apply(
+            lambda x: f"{int(x):,}" if pd.notna(x) and x != None else "정보 없음"
+        )
+
+        # 필요한 경우 열 순서 재정렬
+        columns_order = [
+            "회사명", "대표이사", "주소", "설립일", "법인구분",
+            "최대주주", "보유수량", "지분율",
+            "매출액", "영업이익", "당기순이익",
+            "자산총계", "부채총계", "자본총계",
+            "시가총액(억원)", "발행주식 총수", "전일 종가"
+        ]
+        df_comparison = df_comparison.reindex(columns=columns_order)
 
         df_transposed = df_comparison.T
         st.write(f"**{len(comparison_results)}개 회사 정보 비교 결과**")
