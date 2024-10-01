@@ -6,7 +6,9 @@ from utils import (
     get_stock_info,
     get_stock_close_price,
     get_major_shareholder_info,
-    get_financial_statements
+    get_financial_statements,
+    get_corp_code,
+    supabase
 )
 
 # Streamlit UI
@@ -15,11 +17,30 @@ st.title("다중 회사 정보 조회 및 비교")
 # API 인증키 입력
 crtfc_key = st.text_input("API 인증키 입력", type="password")
 
-# 상장 회사 목록 CSV 파일 불러오기
-df_listed = pd.read_csv('listed_corp.csv', dtype=str, encoding='utf-8')
+# 회사명 목록 가져오기 (Supabase에서)
+@st.cache_data
+def load_company_names():
+    page_size = 1000  # 한 번에 가져올 데이터 개수
+    start = 0
+    company_names = []
 
-# 회사명 목록 생성
-company_names = df_listed['corp_name'].unique().tolist()
+    while True:
+        # 1000개의 데이터를 가져오는 페이징 처리
+        response = supabase.table("listed_corp").select("corp_name").range(start, start + page_size - 1).execute()
+        
+        if response.data:
+            company_names.extend([item['corp_name'] for item in response.data])
+            if len(response.data) < page_size:
+                # 더 이상 가져올 데이터가 없을 경우 반복 종료
+                break
+            start += page_size
+        else:
+            st.error("회사명 데이터를 가져올 수 없습니다.")
+            return []
+
+    return company_names
+
+company_names = load_company_names()
 
 # 사용자로부터 다중 회사명 선택 받기 (자동 완성 지원)
 corp_name_list = st.multiselect("회사명 선택", company_names)
@@ -58,10 +79,14 @@ if search_clicked and corp_name_list and crtfc_key:
 
     for corp_name in corp_name_list:
         try:
-            corp_code = df_listed.loc[df_listed['corp_name'] == corp_name, 'corp_code'].values[0]
+            corp_code = get_corp_code(corp_name)  # Supabase에서 corp_code 가져오기
+            if not corp_code:
+                st.error(f"해당하는 회사명을 찾을 수 없습니다: {corp_name}")
+                continue
+
             company_info = get_company_info(crtfc_key, corp_code)
             total_issued_stocks = get_stock_info(crtfc_key, corp_code, bsns_year, reprt_code)
-            close_price = get_stock_close_price(corp_name, df_listed)
+            close_price = get_stock_close_price(corp_name)
 
             # 최대주주 정보 가져오기
             major_shareholder_info = get_major_shareholder_info(corp_code, crtfc_key, bsns_year, reprt_code)
@@ -82,8 +107,6 @@ if search_clicked and corp_name_list and crtfc_key:
 
             comparison_results.append(company_info)
 
-        except IndexError:
-            st.error(f"해당하는 회사명을 찾을 수 없습니다: {corp_name}")
         except Exception as e:
             st.error(f"오류 발생: {str(e)}")
 
@@ -97,7 +120,7 @@ if search_clicked and corp_name_list and crtfc_key:
 
         # 필요한 경우 열 순서 재정렬
         columns_order = [
-            "회사명", "대표이사", "주소", "설립일", "법인구분",
+            "회사명", "대표이사", "주소", "설립일", "법인구분", "업종명",
             "최대주주", "보유수량", "지분율",
             "매출액", "영업이익", "당기순이익",
             "자산총계", "부채총계", "자본총계",

@@ -2,11 +2,49 @@ import pandas as pd
 import requests
 from pykrx import stock
 from datetime import datetime, timedelta
+from supabase import create_client, Client
+import streamlit as st
 
-### 기업개황
+# Supabase 연결 설정
+@st.cache_resource
+def init_supabase():
+    url = st.secrets["supabase"]["url"]
+    key = st.secrets["supabase"]["key"]
+    supabase: Client = create_client(url, key)
+    return supabase
+
+supabase = init_supabase()
+
+# corp_name 값을 기준으로 corp_code를 조회하는 함수
+def get_corp_code(corp_name):
+    response = supabase.table("listed_corp").select("corp_code").eq("corp_name", corp_name).execute()
+    if response.data:
+        return response.data[0]['corp_code']
+    else:
+        print("해당 회사명을 찾을 수 없습니다.")
+        return None
+
+# corp_name 값을 기준으로 stock_code를 조회하는 함수
+def get_stock_code(corp_name):
+    response = supabase.table("listed_corp").select("stock_code").eq("corp_name", corp_name).execute()
+    if response.data:
+        return response.data[0]['stock_code']
+    else:
+        print("해당 회사명을 찾을 수 없습니다.")
+        return None
+
+# 산업코드에 맞는 분류 값을 조회하는 함수
+def get_industry_name(ind_code):
+    response = supabase.table("industry_code").select("classification").eq("industry_code", ind_code).execute()
+    if response.data:
+        return response.data[0]['classification']
+    else:
+        print("해당 산업코드를 찾을 수 없습니다.")
+        return "정보 없음"
+
+### 기업개황 함수
+
 def get_company_info(crtfc_key, corp_code):
-    
-    all_ind_code = pd.read_csv('industry_code.csv', dtype=str)
     url = "https://opendart.fss.or.kr/api/company.json"
     params = {
         "crtfc_key": crtfc_key,
@@ -34,16 +72,11 @@ def get_company_info(crtfc_key, corp_code):
         }
         return mapping.get(corp_cls, '알 수 없음')
 
-    # 산업 분류 찾기 함수
-    def get_industry_name(ind_code, all_ind_code):
-        try:
-            industry_name = all_ind_code.loc[all_ind_code['산업코드'] == ind_code, '분류'].values[0]
-            return industry_name
-        except IndexError:
-            return "산업 분류를 찾을 수 없음"
-
     # 산업코드 가져오기
     ind_code = data.get('induty_code', '')
+
+    # 산업 분류명 가져오기
+    industry_name = get_industry_name(ind_code) if ind_code else "정보 없음"
 
     # 회사 정보 구성
     company_info = {
@@ -52,12 +85,13 @@ def get_company_info(crtfc_key, corp_code):
         "주소": data.get('adres', ''),
         "설립일": format_est_date(data.get('est_dt')),
         "법인구분": format_corp_cls(data.get('corp_cls', '')),
-        "산업분류": get_industry_name(ind_code, all_ind_code)  # 산업 분류 추가
+        "업종명": industry_name  # 업종명 추가
     }
 
     return company_info
 
 ### 발행주식
+
 # 주식 총수 정보를 가져오는 함수
 def get_stock_info(crtfc_key, corp_code, bsns_year, reprt_code):
     url = "https://opendart.fss.or.kr/api/stockTotqySttus.json"
@@ -78,29 +112,29 @@ def get_stock_info(crtfc_key, corp_code, bsns_year, reprt_code):
                 return stock['istc_totqy']
     return None
 
-### 시가총액  
-def get_stock_close_price(corp_name, df_listed):
+### 전일 종가 가져오기
+def get_stock_close_price(corp_name):
     # 주말과 공휴일을 고려한 이전 거래일 계산 함수
     def get_previous_business_day():
         date = datetime.now() - timedelta(1)
         while date.weekday() >= 5:  # 5: Saturday, 6: Sunday
             date -= timedelta(1)
         return date.strftime("%Y%m%d")
-    
+
     try:
-        # df_listed에서 기업명을 기준으로 주식 코드를 찾음
-        stock_code = df_listed.loc[df_listed['corp_name'] == corp_name, 'stock_code'].values[0]
-        
+        # Supabase에서 기업명을 기준으로 주식 코드를 찾음
+        stock_code = get_stock_code(corp_name)
+
         # 이전 거래일 계산
         previous_business_day = get_previous_business_day()
-        
+
         # 주식 종가 데이터를 가져옴
         df = stock.get_market_ohlcv_by_date(previous_business_day, previous_business_day, stock_code)
-        
+
         # 종가 값을 반환
         return df['종가'].values[0]
     except IndexError:
-        print(f"Error: {corp_name} not found in df_listed.")
+        print(f"Error: {corp_name} not found.")
         return None
     except Exception as e:
         print(f"Error fetching stock data: {e}")
@@ -250,3 +284,4 @@ def get_financial_statements(corp_code, crtfc_key, bsns_year, reprt_code, fs_div
         return financial_data
     else:
         return {"message": "API 호출 실패 또는 데이터를 찾을 수 없습니다."}
+
